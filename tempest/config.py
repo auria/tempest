@@ -1075,6 +1075,14 @@ ScenarioGroup = [
                choices=('icmp', 'tcp', 'udp'),
                help='The protocol used in security groups tests to check '
                     'connectivity.'),
+    # Note(aluria): add support for test_server_basic_ops_filtered
+    cfg.StrOpt('boot_hosts_filter',
+               default='{"zones":["nova"]}',
+               help='The target AZs or host filters. Multiple AZs or hosts'
+                    ' can be specified.'
+                    ' (e.g. {"hosts":["host-a", "host-b"]})'
+                    ' If an empty string is specified, ALL the available'
+                    ' compute nodes will be selected.'),
 ]
 
 

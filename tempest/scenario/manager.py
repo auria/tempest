@@ -812,6 +812,29 @@ class ScenarioTest(tempest.test.BaseTestCase):
         return server_details['server']['OS-EXT-SRV-ATTR:host']
 
 
+class ComputeServiceScenarioTest(ScenarioTest):
+    """Base class for advanced compute scenario tests
+
+    This class provides helpers for compute scenario tests that require admin
+    credentials, such as accessing the list of compute services available.
+    """
+
+    credentials = ['primary', 'admin']
+
+    @classmethod
+    def setup_clients(cls):
+        super(ComputeServiceScenarioTest, cls).setup_clients()
+        cls.admin_services_client = cls.os_admin.services_client
+
+    def get_compute_service_list(self, host=None, binary=None):
+        fields = {field: value for field, value in locals().items()
+                  if field != 'self' and value is not None}
+
+        service_list = self.admin_services_client.list_services(**fields)
+        if service_list.get('services') is not None:
+            return service_list['services']
+
+
 class NetworkScenarioTest(ScenarioTest):
     """Base class for network scenario tests.
 
