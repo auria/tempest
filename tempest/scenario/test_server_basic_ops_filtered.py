@@ -97,4 +97,3 @@ class TestServerBasicOpsFiltered(manager.ComputeServiceScenarioTest):
                 getattr(srv, 'OS-EXT-SRV-ATTR:host'))
             )
             self.assertEqual(az_host, actual)
-            self.servers_client.delete_server(instance['id'])

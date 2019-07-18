@@ -833,6 +833,143 @@ class ComputeServiceScenarioTest(ScenarioTest):
         service_list = self.admin_services_client.list_services(**fields)
         if service_list.get('services') is not None:
             return service_list['services']
+        else:
+            return []
+
+    def create_server(self, name=None, image_id=None, flavor=None,
+                      validatable=False, wait_until='ACTIVE',
+                      clients=None, **kwargs):
+        """Wrapper utility that returns a test server.
+
+        This wrapper utility calls the common create test server and
+        returns a test server. The purpose of this wrapper is to minimize
+        the impact on the code of the tests already using this
+        function.
+
+        :param **kwargs:
+            See extra parameters below
+
+        :Keyword Arguments:
+            * *vnic_type* (``string``) --
+              used when launching instances with pre-configured ports.
+              Examples:
+                normal: a traditional virtual port that is either attached
+                        to a linux bridge or an openvswitch bridge on a
+                        compute node.
+                direct: an SR-IOV port that is directly attached to a VM
+                macvtap: an SR-IOV port that is attached to a VM via a macvtap
+                         device.
+              Defaults to ``CONF.network.port_vnic_type``.
+            * *port_profile* (``dict``) --
+              This attribute is a dictionary that can be used (with admin
+              credentials) to supply information influencing the binding of
+              the port.
+              example: port_profile = "capabilities:[switchdev]"
+              Defaults to ``CONF.network.port_profile``.
+        """
+
+        # NOTE(jlanoux): As a first step, ssh checks in the scenario
+        # tests need to be run regardless of the run_validation and
+        # validatable parameters and thus until the ssh validation job
+        # becomes voting in CI. The test resources management and IP
+        # association are taken care of in the scenario tests.
+        # Therefore, the validatable parameter is set to false in all
+        # those tests. In this way create_server just return a standard
+        # server and the scenario tests always perform ssh checks.
+
+        # Needed for the cross_tenant_traffic test:
+        if clients is None:
+            clients = self.os_admin
+
+        if image_id is None:
+            image_id = CONF.compute.image_ref
+
+        if flavor is None:
+            flavor = CONF.compute.flavor_ref
+
+        if name is None:
+            name = data_utils.rand_name(self.__class__.__name__ + "-server")
+
+        vnic_type = kwargs.pop('vnic_type', CONF.network.port_vnic_type)
+        profile = kwargs.pop('port_profile', CONF.network.port_profile)
+
+        # If vnic_type or profile are configured create port for
+        # every network
+        if vnic_type or profile:
+            ports = []
+            create_port_body = {}
+
+            if vnic_type:
+                create_port_body['binding:vnic_type'] = vnic_type
+
+            if profile:
+                create_port_body['binding:profile'] = profile
+
+            if kwargs:
+                # Convert security group names to security group ids
+                # to pass to create_port
+                if 'security_groups' in kwargs:
+                    security_groups = \
+                        clients.security_groups_client.list_security_groups(
+                        ).get('security_groups')
+                    sec_dict = dict([(s['name'], s['id'])
+                                     for s in security_groups])
+
+                    sec_groups_names = [s['name'] for s in kwargs.pop(
+                        'security_groups')]
+                    security_groups_ids = [sec_dict[s]
+                                           for s in sec_groups_names]
+
+                    if security_groups_ids:
+                        create_port_body[
+                            'security_groups'] = security_groups_ids
+                networks = kwargs.pop('networks', [])
+            else:
+                networks = []
+
+            # If there are no networks passed to us we look up
+            # for the project's private networks and create a port.
+            # The same behaviour as we would expect when passing
+            # the call to the clients with no networks
+            if not networks:
+                networks = clients.networks_client.list_networks(
+                    **{'router:external': False, 'fields': 'id'})['networks']
+
+            # It's net['uuid'] if networks come from kwargs
+            # and net['id'] if they come from
+            # clients.networks_client.list_networks
+            for net in networks:
+                net_id = net.get('uuid', net.get('id'))
+                if 'port' not in net:
+                    port = self.create_port(network_id=net_id,
+                                            client=clients.ports_client,
+                                            **create_port_body)
+                    ports.append({'port': port['id']})
+                else:
+                    ports.append({'port': net['port']})
+            if ports:
+                kwargs['networks'] = ports
+            self.ports = ports
+
+        tenant_network = self.get_tenant_network()
+
+        if CONF.compute.compute_volume_common_az:
+            kwargs.setdefault('availability_zone',
+                              CONF.compute.compute_volume_common_az)
+
+        body, _ = compute.create_test_server(
+            clients,
+            tenant_network=tenant_network,
+            wait_until=wait_until,
+            name=name, flavor=flavor,
+            image_id=image_id, **kwargs)
+
+        self.addCleanup(waiters.wait_for_server_termination,
+                        clients.servers_client, body['id'])
+        self.addCleanup(test_utils.call_and_ignore_notfound_exc,
+                        clients.servers_client.delete_server, body['id'])
+        server = clients.servers_client.show_server(body['id'])['server']
+        return server
 
 
 class NetworkScenarioTest(ScenarioTest):
